@@ -1,6 +1,7 @@
 package com.openapi.paypal_krpost.api
 
 import com.openapi.paypal_krpost.domain.dto.request.CreateOrderRequest
+import com.openapi.paypal_krpost.domain.dto.request.InvoiceCreateRequest
 import com.openapi.paypal_krpost.domain.entity.PaymentStatus
 import com.openapi.paypal_krpost.service.PaymentsService
 import org.springframework.web.bind.annotation.*
@@ -41,5 +42,15 @@ class PaymentsApi(
         @PathVariable orderId: String
     ): PaymentStatus {
         return paymentsService.getPaymentDetails(orderId)
+    }
+
+    /**
+     * 인보이스 생성 API
+     */
+    @PostMapping("/invoices")
+    fun createAndSendInvoice(
+        @RequestBody request: InvoiceCreateRequest
+    ): String {
+        return paymentsService.createAndSendInvoice(request)
     }
 }
