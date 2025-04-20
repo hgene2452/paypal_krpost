@@ -337,3 +337,438 @@ d. 금액,주문ID,캡쳐ID,사용자ID 마지막으로 결제 검증
 <img width="637" alt="image (17)" src="https://github.com/user-attachments/assets/4b221350-b628-4e49-bd5d-ac45d36e667c" />
 
 - 그리고 다시 해당 결제주문의 상세정보를 조회해보면, 상태값이 `COMPLETED`로 결제가 잘 완료되었음을 알 수 있음.
+
+---
+
+## 3 paypal invoice 연동
+
+> PayPal Order를 생성한 결과 결제 URL과 함께 사용자 이메일로 결제요청을 보내야 한다.
+> 
+
+### 3.1 요약
+```json
+인보이스 드래프트 생성 (POST /v2/invoicing/invoices)
+↓
+인보이스 발송 (POST /v2/invoicing/invoices/{invoice_id}/send)
+↓
+고객이 메일 수신 후 Pay Now 클릭
+↓
+고객 결제 완료 (PayPal이 자동 처리)
+↓
+서버에서 상태 조회 또는 Webhook으로 결제 완료 수신
+↓
+결제 완료 시 DB 업데이트
+```
+---
+
+### 3.2 Rest API 정리
+a. Create draft invoice
+```bash
+curl -v -X POST https://api-m.sandbox.paypal.com/v2/invoicing/invoices \
+-H 'Authorization: Bearer zekwhYgsYYI0zDg0p_Nf5v78VelCfYR0' \
+-H 'Content-Type: application/json' \
+-H 'Prefer: return=representation' \
+-d '{
+  "detail": {
+    "invoice_number": "#123",
+    "reference": "deal-ref",
+    "invoice_date": "2018-11-12",
+    "currency_code": "USD",
+    "note": "Thank you for your business.",
+    "term": "No refunds after 30 days.",
+    "memo": "This is a long contract",
+    "payment_term": {
+      "term_type": "NET_10",
+      "due_date": "2018-11-22"
+    }
+  },
+  "invoicer": {
+    "name": {
+      "given_name": "David",
+      "surname": "Larusso"
+    },
+    "address": {
+      "address_line_1": "1234 First Street",
+      "address_line_2": "337673 Hillside Court",
+      "admin_area_2": "Anytown",
+      "admin_area_1": "CA",
+      "postal_code": "98765",
+      "country_code": "US"
+    },
+    "email_address": "merchant@example.com",
+    "phones": [
+      {
+        "country_code": "001",
+        "national_number": "4085551234",
+        "phone_type": "MOBILE"
+      }
+    ],
+    "website": "www.test.com",
+    "tax_id": "ABcNkWSfb5ICTt73nD3QON1fnnpgNKBy- Jb5SeuGj185MNNw6g",
+    "logo_url": "https://example.com/logo.PNG",
+    "additional_notes": "2-4"
+  },
+  "primary_recipients": [
+    {
+      "billing_info": {
+        "name": {
+          "given_name": "Stephanie",
+          "surname": "Meyers"
+        },
+        "address": {
+          "address_line_1": "1234 Main Street",
+          "admin_area_2": "Anytown",
+          "admin_area_1": "CA",
+          "postal_code": "98765",
+          "country_code": "US"
+        },
+        "email_address": "bill-me@example.com",
+        "phones": [
+          {
+            "country_code": "001",
+            "national_number": "4884551234",
+            "phone_type": "HOME"
+          }
+        ],
+        "additional_info_value": "add-info"
+      },
+      "shipping_info": {
+        "name": {
+          "given_name": "Stephanie",
+          "surname": "Meyers"
+        },
+        "address": {
+          "address_line_1": "1234 Main Street",
+          "admin_area_2": "Anytown",
+          "admin_area_1": "CA",
+          "postal_code": "98765",
+          "country_code": "US"
+        }
+      }
+    }
+  ],
+  "items": [
+    {
+      "name": "Yoga Mat",
+      "description": "Elastic mat to practice yoga.",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "50.00"
+      },
+      "tax": {
+        "name": "Sales Tax",
+        "percent": "7.25"
+      },
+      "discount": {
+        "percent": "5"
+      },
+      "unit_of_measure": "QUANTITY"
+    }
+  ],
+  "configuration": {
+    "partial_payment": {
+      "allow_partial_payment": true,
+      "minimum_amount_due": {
+        "currency_code": "USD",
+        "value": "20.00"
+      }
+    },
+    "allow_tip": true,
+    "tax_calculated_after_discount": true,
+    "tax_inclusive": false,
+    "template_id": "TEMP-19V05281TU309413B"
+  },
+  "amount": {
+    "breakdown": {
+      "custom": {
+        "label": "Packing Charges",
+        "amount": {
+          "currency_code": "USD",
+          "value": "10.00"
+        }
+      },
+      "shipping": {
+        "amount": {
+          "currency_code": "USD",
+          "value": "10.00"
+        },
+        "tax": {
+          "name": "Sales Tax",
+          "percent": "7.25"
+        }
+      },
+      "discount": {
+        "invoice_discount": {
+          "percent": "5"
+        }
+      }
+    }
+  }
+}'
+```
+```json
+{
+  "id": "INV2-Z56S-5LLA-Q52L-CPZ5",
+  "status": "DRAFT",
+  "detail": {
+    "invoice_number": "#123",
+    "reference": "deal-ref",
+    "invoice_date": "2018-11-12",
+    "currency_code": "USD",
+    "note": "Thank you for your business.",
+    "term": "No refunds after 30 days.",
+    "memo": "This is a long contract",
+    "payment_term": {
+      "term_type": "NET_10",
+      "due_date": "2018-11-22"
+    },
+    "metadata": {
+      "create_time": "2018-11-12T08:00:20Z",
+      "recipient_view_url": "https://www.api-m.paypal.com/invoice/p#Z56S5LLAQ52LCPZ5",
+      "invoicer_view_url": "https://www.api-m.paypal.com/invoice/details/INV2-Z56S-5LLA-Q52L-CPZ5"
+    }
+  },
+  "invoicer": {
+    "name": {
+      "given_name": "David",
+      "surname": "Larusso"
+    },
+    "address": {
+      "address_line_1": "1234 First Street",
+      "address_line_2": "337673 Hillside Court",
+      "admin_area_2": "Anytown",
+      "admin_area_1": "CA",
+      "postal_code": "98765",
+      "country_code": "US"
+    },
+    "email_address": "merchant@example.com",
+    "phones": [
+      {
+        "country_code": "001",
+        "national_number": "4085551234",
+        "phone_type": "MOBILE"
+      }
+    ],
+    "website": "https://example.com",
+    "tax_id": "ABcNkWSfb5ICTt73nD3QON1fnnpgNKBy-Jb5SeuGj185MNNw6g",
+    "logo_url": "https://example.com/logo.PNG",
+    "additional_notes": "2-4"
+  },
+  "primary_recipients": [
+    {
+      "billing_info": {
+        "name": {
+          "given_name": "Stephanie",
+          "surname": "Meyers"
+        },
+        "address": {
+          "address_line_1": "1234 Main Street",
+          "admin_area_2": "Anytown",
+          "admin_area_1": "CA",
+          "postal_code": "98765",
+          "country_code": "US"
+        },
+        "email_address": "bill-me@example.com",
+        "phones": [
+          {
+            "country_code": "001",
+            "national_number": "4884551234",
+            "phone_type": "HOME"
+          }
+        ],
+        "additional_info_value": "add-info"
+      },
+      "shipping_info": {
+        "name": {
+          "given_name": "Stephanie",
+          "surname": "Meyers"
+        },
+        "address": {
+          "address_line_1": "1234 Main Street",
+          "admin_area_2": "Anytown",
+          "admin_area_1": "CA",
+          "postal_code": "98765",
+          "country_code": "US"
+        }
+      }
+    }
+  ],
+  "items": [
+    {
+      "name": "Yoga Mat",
+      "description": "Elastic mat to practice yoga.",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "50.00"
+      },
+      "tax": {
+        "name": "Sales Tax",
+        "percent": "7.25",
+        "amount": {
+          "currency_code": "USD",
+          "value": "3.27",
+          "tax_note": "Reduced tax rate"
+        }
+      },
+      "discount": {
+        "percent": "5",
+        "amount": {
+          "currency_code": "USD",
+          "value": "2.5"
+        }
+      },
+      "unit_of_measure": "QUANTITY"
+    }
+  ],
+  "configuration": {
+    "partial_payment": {
+      "allow_partial_payment": true,
+      "minimum_amount_due": {
+        "currency_code": "USD",
+        "value": "20.00"
+      }
+    },
+    "allow_tip": true,
+    "tax_calculated_after_discount": true,
+    "tax_inclusive": false,
+    "template_id": "TEMP-19V05281TU309413B"
+  },
+  "amount": {
+    "currency_code": "USD",
+    "value": "74.21",
+    "breakdown": {
+      "item_total": {
+        "currency_code": "USD",
+        "value": "60.00"
+      },
+      "custom": {
+        "label": "Packing Charges",
+        "amount": {
+          "currency_code": "USD",
+          "value": "10.00"
+        }
+      },
+      "shipping": {
+        "amount": {
+          "currency_code": "USD",
+          "value": "10.00"
+        },
+        "tax": {
+          "name": "Sales Tax",
+          "percent": "7.25",
+          "amount": {
+            "currency_code": "USD",
+            "value": "0.73",
+            "tax_note": "Reduced tax rate"
+          }
+        }
+      },
+      "discount": {
+        "item_discount": {
+          "currency_code": "USD",
+          "value": "-7.50"
+        },
+        "invoice_discount": {
+          "percent": "5",
+          "amount": {
+            "currency_code": "USD",
+            "value": "-2.63"
+          }
+        }
+      },
+      "tax_total": {
+        "currency_code": "USD",
+        "value": "4.34"
+      }
+    }
+  },
+  "due_amount": {
+    "currency_code": "USD",
+    "value": "74.21"
+  },
+  "links": [
+    {
+      "href": "https://api-m.paypal.com/v2/invoicing/invoices/INV2-Z56S-5LLA-Q52L-CPZ5",
+      "rel": "self",
+      "method": "GET"
+    },
+    {
+      "href": "https://api-m.paypal.com/v2/invoicing/invoices/INV2-Z56S-5LLA-Q52L-CPZ5/send",
+      "rel": "send",
+      "method": "POST"
+    },
+    {
+      "href": "https://api-m.paypal.com/v2/invoicing/invoices/INV2-Z56S-5LLA-Q52L-CPZ5/update",
+      "rel": "replace",
+      "method": "PUT"
+    },
+    {
+      "href": "https://api-m.paypal.com/v2/invoicing/invoices/INV2-Z56S-5LLA-Q52L-CPZ5",
+      "rel": "delete",
+      "method": "DELETE"
+    },
+    {
+      "href": "https://api-m.paypal.com/v2/invoicing/invoices/INV2-Z56S-5LLA-Q52L-CPZ5/payments",
+      "rel": "record-payment",
+      "method": "POST"
+    },
+    {
+      "href": "https://api-m.paypal.com/v2/invoicing/invoices/INV2-Z56S-5LLA-Q52L-CPZ5/generate-qr-code",
+      "rel": "qr-code",
+      "method": "POST"
+    }
+  ]
+}
+```
+<br>
+b. Send invoice
+
+- PayPal Developers에서 Webhook 추가 가능
+
+---
+### 3.3 서버 구축
+
+**a. 인보이스 생성**
+
+- 응답값으로 받아온 `invoice_id`, `recipient_view_url`, 연관된 `payments` 객체를 DB에 저장 (`invoice` 테이블 추가).
+
+**b. 인보이스 전송**
+
+- 기본적으로 수신자에게 PayPal이 이메일 자동 발송.
+
+**c. 고객이 결제**
+
+- 고객은 이메일로 받은 링크를 클릭해서 결제.
+- 결제 완료시, PayPal이 인보이스를 자동으로 PAID 상태로 업데이트.
+
+**d. 웹 훅 등록**
+
+- Webhook URL (우리 서버)을 등록해두면 PayPal이 결제 완료될 때마다 실시간으로 알림 보내줌.
+- 이벤트 : `INVOICING.INVOICE.PAID` (인보이스 결제 완료).
+- 결제 완료 웹 훅을 받으면, DB 업데이트 → 우체국 택배 접수.
+- 웹 훅은 1번만 등록하면 됨.
+    - URL이 바뀌거나 / 이벤트 타입 추가할 때만 재등록 또는 업데이트 필요.
+    - PayPal 서버에 저장되어 관리되기 때문에 따로 저장하지 않아도 됨.
+
+---
+### 3.3 테스트
+
+- ngrok HTTPS 터널을 생성해서 로컬호스트 주소를 우회한 URL을 웹훅 서버 URL로 등록.
+<br>
+
+- Invoice 생성 및 전송 요청을 보낸 후, DB에 Status.DRAFT부터 저장.
+
+<img width="951" alt="image (18)" src="https://github.com/user-attachments/assets/489b4cb0-8e77-4dea-9864-0557ceaaaae8" />
+<br>
+
+- 전송된 사용자(결제하는 고객)의 ID로 로그인시 해당 메일 인보이스가 보임.
+
+<img width="1359" alt="image (19)" src="https://github.com/user-attachments/assets/0155af74-d973-4312-8030-ca5e1d75ed42" />
+<br>
+
+- 사용자가 결제할 경우, 해당 Invoice의 상태가 PAID로 변경되며 이때 이벤트가 발생하여 웹훅으로 백엔드 서버에서 요청을 응답받을 수 있음.
+- 이때, 백엔드 상태도 PAID로 업데이트.
+
+<img width="939" alt="image (20)" src="https://github.com/user-attachments/assets/a602aee6-fcec-44d7-8e91-8a73329a0468" />
